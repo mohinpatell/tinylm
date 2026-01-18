@@ -108,11 +108,89 @@ class TransformerBlock(nn.Module):
         return x
 
 
+class GPT(nn.Module):
+    """GPT language model.
+
+    Stack of transformer blocks with token + positional embeddings.
+    Output head shares weights with the token embedding (weight tying).
+    """
+
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+
+        self.tok_emb = nn.Embedding(config.vocab_size, config.n_embd)
+        self.pos_emb = nn.Embedding(config.block_size, config.n_embd)
+        self.drop = nn.Dropout(config.dropout)
+
+        self.blocks = nn.ModuleList([TransformerBlock(config) for _ in range(config.n_layer)])
+        self.ln_f = nn.LayerNorm(config.n_embd)
+
+        # output head projects back to vocab size
+        self.head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+
+        # weight tying: share token embedding weights with output head
+        # this is what GPT-2 does, reduces params and acts as regularization
+        self.head.weight = self.tok_emb.weight
+
+        self._init_weights()
+
+    def _init_weights(self):
+        """GPT-2 style initialization."""
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+                if module.bias is not None:
+                    torch.nn.init.zeros_(module.bias)
+            elif isinstance(module, nn.Embedding):
+                torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+
+        # scale residual projections by 1/sqrt(n_layers)
+        # this prevents the residual stream from growing too large in deep networks
+        for block in self.blocks:
+            torch.nn.init.normal_(block.attn.out_proj.weight, mean=0.0,
+                                  std=0.02 / math.sqrt(2 * config.n_layer))
+            torch.nn.init.normal_(block.ffn.fc2.weight, mean=0.0,
+                                  std=0.02 / math.sqrt(2 * config.n_layer))
+
+    def forward(self, idx, targets=None):
+        """
+        idx: (B, T) token indices
+        targets: (B, T) target token indices (optional, for computing loss)
+        """
+        B, T = idx.shape
+        assert T <= self.config.block_size, f'sequence length {T} > block_size {self.config.block_size}'
+
+        # token + positional embeddings
+        pos = torch.arange(T, device=idx.device)
+        x = self.tok_emb(idx) + self.pos_emb(pos)
+        x = self.drop(x)
+
+        # transformer blocks
+        for block in self.blocks:
+            x = block(x)
+
+        x = self.ln_f(x)
+        logits = self.head(x)  # (B, T, vocab_size)
+
+        loss = None
+        if targets is not None:
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+
+        return logits, loss
+
+
 if __name__ == '__main__':
     config = GPTConfig()
-    block = TransformerBlock(config)
+    model = GPT(config)
 
-    x = torch.randn(2, 16, config.n_embd)
-    out = block(x)
-    print(f'TransformerBlock: {x.shape} -> {out.shape}')
-    print(f'Params: {sum(p.numel() for p in block.parameters()):,}')
+    n_params = sum(p.numel() for p in model.parameters())
+    print(f'GPT model: {n_params:,} parameters')
+
+    # test forward pass
+    idx = torch.randint(0, config.vocab_size, (2, 32))
+    targets = torch.randint(0, config.vocab_size, (2, 32))
+    logits, loss = model(idx, targets)
+    print(f'Input:  {idx.shape}')
+    print(f'Logits: {logits.shape}')
+    print(f'Loss:   {loss.item():.4f}')
