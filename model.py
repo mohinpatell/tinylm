@@ -149,9 +149,9 @@ class GPT(nn.Module):
         # this prevents the residual stream from growing too large in deep networks
         for block in self.blocks:
             torch.nn.init.normal_(block.attn.out_proj.weight, mean=0.0,
-                                  std=0.02 / math.sqrt(2 * config.n_layer))
+                                  std=0.02 / math.sqrt(2 * self.config.n_layer))
             torch.nn.init.normal_(block.ffn.fc2.weight, mean=0.0,
-                                  std=0.02 / math.sqrt(2 * config.n_layer))
+                                  std=0.02 / math.sqrt(2 * self.config.n_layer))
 
     def forward(self, idx, targets=None):
         """
