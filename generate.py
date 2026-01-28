@@ -38,12 +38,23 @@ def generate(model, tok, config, prompt='', max_new_tokens=500,
     else:
         idx = torch.zeros((1, 1), dtype=torch.long, device=device)
 
-    for _ in range(max_new_tokens):
-        # crop to block_size if needed
-        idx_cond = idx[:, -config.block_size:]
+    all_tokens = idx
+    kv_caches = None
 
-        logits, _ = model(idx_cond)
+    for _ in range(max_new_tokens):
+        # if we have a KV cache and it's within block_size, just feed the last token
+        if kv_caches is not None:
+            input_ids = all_tokens[:, -1:]
+        else:
+            # no cache (first iter or cache was dropped): feed last block_size tokens
+            input_ids = all_tokens[:, -config.block_size:]
+
+        logits, _, kv_caches = model(input_ids, kv_caches=kv_caches)
         logits = logits[:, -1, :]  # (1, vocab_size)
+
+        # drop cache if sequence exceeds block_size (positions would be wrong)
+        if kv_caches[0][0].shape[2] >= config.block_size:
+            kv_caches = None
 
         # temperature scaling
         logits = logits / temperature
@@ -57,9 +68,7 @@ def generate(model, tok, config, prompt='', max_new_tokens=500,
         if top_p is not None:
             sorted_logits, sorted_indices = torch.sort(logits, descending=True)
             cumulative_probs = torch.cumsum(torch.softmax(sorted_logits, dim=-1), dim=-1)
-            # remove tokens with cumulative prob above the threshold
             sorted_indices_to_remove = cumulative_probs > top_p
-            # shift so we always keep at least one token
             sorted_indices_to_remove[:, 1:] = sorted_indices_to_remove[:, :-1].clone()
             sorted_indices_to_remove[:, 0] = False
             indices_to_remove = sorted_indices_to_remove.scatter(1, sorted_indices, sorted_indices_to_remove)
@@ -67,9 +76,9 @@ def generate(model, tok, config, prompt='', max_new_tokens=500,
 
         probs = torch.softmax(logits, dim=-1)
         next_tok = torch.multinomial(probs, num_samples=1)
-        idx = torch.cat([idx, next_tok], dim=1)
+        all_tokens = torch.cat([all_tokens, next_tok], dim=1)
 
-    return tok.decode(idx[0].tolist())
+    return tok.decode(all_tokens[0].tolist())
 
 
 if __name__ == '__main__':

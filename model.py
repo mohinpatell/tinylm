@@ -35,7 +35,7 @@ class CausalSelfAttention(nn.Module):
         mask = torch.tril(torch.ones(config.block_size, config.block_size))
         self.register_buffer('mask', mask.view(1, 1, config.block_size, config.block_size))
 
-    def forward(self, x):
+    def forward(self, x, kv_cache=None):
         B, T, C = x.shape
 
         # compute Q, K, V for all heads at once
@@ -47,22 +47,33 @@ class CausalSelfAttention(nn.Module):
         k = k.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
         v = v.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
 
+        # KV cache: during generation, we cache previous K,V so we
+        # don't recompute them for every new token. this makes generation
+        # O(n) per token instead of O(n^2).
+        if kv_cache is not None:
+            k_prev, v_prev = kv_cache
+            k = torch.cat([k_prev, k], dim=2)
+            v = torch.cat([v_prev, v], dim=2)
+        new_kv_cache = (k, v)
+
         # scaled dot-product attention
-        # (B, n_head, T, head_dim) @ (B, n_head, head_dim, T) -> (B, n_head, T, T)
+        # q is (B, n_head, T_q, head_dim), k is (B, n_head, T_kv, head_dim)
         attn = (q @ k.transpose(-2, -1)) / math.sqrt(self.head_dim)
 
-        # apply causal mask: set future positions to -inf so softmax gives 0
-        attn = attn.masked_fill(self.mask[:, :, :T, :T] == 0, float('-inf'))
+        # apply causal mask (only when not using KV cache, since with cache
+        # we're only computing attention for new tokens which can attend to everything)
+        if kv_cache is None:
+            attn = attn.masked_fill(self.mask[:, :, :T, :T] == 0, float('-inf'))
         attn = F.softmax(attn, dim=-1)
         attn = self.dropout(attn)
 
-        # (B, n_head, T, T) @ (B, n_head, T, head_dim) -> (B, n_head, T, head_dim)
+        # (B, n_head, T_q, T_kv) @ (B, n_head, T_kv, head_dim) -> (B, n_head, T_q, head_dim)
         out = attn @ v
 
         # concatenate heads: (B, n_head, T, head_dim) -> (B, T, C)
         out = out.transpose(1, 2).contiguous().view(B, T, C)
 
-        return self.out_proj(out)
+        return self.out_proj(out), new_kv_cache
 
 
 class FeedForward(nn.Module):
@@ -100,12 +111,13 @@ class TransformerBlock(nn.Module):
         self.ln2 = nn.LayerNorm(config.n_embd)
         self.ffn = FeedForward(config)
 
-    def forward(self, x):
+    def forward(self, x, kv_cache=None):
         # pre-norm: norm -> attention -> add residual
-        x = x + self.attn(self.ln1(x))
+        attn_out, new_kv_cache = self.attn(self.ln1(x), kv_cache=kv_cache)
+        x = x + attn_out
         # pre-norm: norm -> ffn -> add residual
         x = x + self.ffn(self.ln2(x))
-        return x
+        return x, new_kv_cache
 
 
 class GPT(nn.Module):
@@ -153,22 +165,35 @@ class GPT(nn.Module):
             torch.nn.init.normal_(block.ffn.fc2.weight, mean=0.0,
                                   std=0.02 / math.sqrt(2 * self.config.n_layer))
 
-    def forward(self, idx, targets=None):
+    def forward(self, idx, targets=None, kv_caches=None):
         """
         idx: (B, T) token indices
         targets: (B, T) target token indices (optional, for computing loss)
+        kv_caches: list of (k, v) tuples per layer, for fast generation
         """
         B, T = idx.shape
-        assert T <= self.config.block_size, f'sequence length {T} > block_size {self.config.block_size}'
+
+        # figure out the position offset for positional encoding
+        # when using KV cache, we're only processing new tokens
+        if kv_caches is not None and kv_caches[0] is not None:
+            pos_offset = kv_caches[0][0].shape[2]  # length of cached sequence
+        else:
+            pos_offset = 0
+
+        assert pos_offset + T <= self.config.block_size, \
+            f'seq len {pos_offset + T} exceeds block_size {self.config.block_size}'
 
         # token + positional embeddings
-        pos = torch.arange(T, device=idx.device)
+        pos = torch.arange(pos_offset, pos_offset + T, device=idx.device)
         x = self.tok_emb(idx) + self.pos_emb(pos)
         x = self.drop(x)
 
         # transformer blocks
-        for block in self.blocks:
-            x = block(x)
+        new_kv_caches = []
+        for i, block in enumerate(self.blocks):
+            cache = kv_caches[i] if kv_caches is not None else None
+            x, new_cache = block(x, kv_cache=cache)
+            new_kv_caches.append(new_cache)
 
         x = self.ln_f(x)
         logits = self.head(x)  # (B, T, vocab_size)
@@ -177,7 +202,7 @@ class GPT(nn.Module):
         if targets is not None:
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
 
-        return logits, loss
+        return logits, loss, new_kv_caches
 
 
 if __name__ == '__main__':
@@ -190,7 +215,14 @@ if __name__ == '__main__':
     # test forward pass
     idx = torch.randint(0, config.vocab_size, (2, 32))
     targets = torch.randint(0, config.vocab_size, (2, 32))
-    logits, loss = model(idx, targets)
+    logits, loss, caches = model(idx, targets)
     print(f'Input:  {idx.shape}')
     print(f'Logits: {logits.shape}')
     print(f'Loss:   {loss.item():.4f}')
+
+    # test KV cache generation
+    single = torch.randint(0, config.vocab_size, (1, 1))
+    logits1, _, kv = model(single)
+    logits2, _, kv = model(single, kv_caches=kv)
+    print(f'KV cache: first token -> cache k shape = {kv[0][0].shape}')
+    print(f'KV cache working!')

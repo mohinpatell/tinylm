@@ -34,7 +34,7 @@ def estimate_loss(model, train_loader, val_loader, n_steps, device):
             if i >= n_steps:
                 break
             x, y = x.to(device), y.to(device)
-            _, loss = model(x, y)
+            _, loss, _ = model(x, y)
             total_loss += loss.item()
             count += 1
         losses[name] = total_loss / max(count, 1)
@@ -97,7 +97,7 @@ def train():
             param_group['lr'] = lr
 
         # forward + backward
-        _, loss = model(x, y)
+        _, loss, _ = model(x, y)
         loss.backward()
 
         # gradient clipping
@@ -127,15 +127,19 @@ def train():
     }, ckpt_path)
     print(f'\nSaved checkpoint to {ckpt_path}')
 
-    # generate a sample
+    # generate a sample using KV cache
     model.eval()
     prompt = torch.zeros((1, 1), dtype=torch.long, device=device)
+    kv_caches = [None] * gpt_config.n_layer
     with torch.no_grad():
+        # first pass: process the initial token
+        logits, _, kv_caches = model(prompt, kv_caches=None)
         for _ in range(200):
-            logits, _ = model(prompt[:, -gpt_config.block_size:])
             probs = torch.softmax(logits[:, -1, :] / 0.8, dim=-1)
             next_tok = torch.multinomial(probs, num_samples=1)
             prompt = torch.cat([prompt, next_tok], dim=1)
+            # only process the new token, cache handles the rest
+            logits, _, kv_caches = model(next_tok, kv_caches=kv_caches)
     generated = tok.decode(prompt[0].tolist())
     print(f'\nGenerated sample:\n{generated}')
 
