@@ -10,25 +10,32 @@ Trained on Shakespeare. It writes decent fake Shakespeare.
 
 ```
 ROMEO:
-What is the beauty flatter of my hand:
-Shall was good so live the best thing,
-Which this weigh to me stand this discalled,
-Farewell for what what his sound as spite...
+Hath pleased liver himself to shride so the king.
+
+ROMEO:
+He hath sent to live him to speak.
+
+BENVOLIO:
+My lord, I will give him that my know
+And think there, being in his love and long
+The ambitious trades of war; I must to make
+His power comfort and be this heart...
 ```
 
 ```
-JULIET:
-I am cause.
+KING HENRY:
+Now will to all his self--
 
-KING EDWARD IV:
-A marcious man and most me the word.
+QUEEN ELIZABETH:
+So do not that be gone, which is no poison,
+Or 'tis more than the king and with man.
 
-VILLIA:
-God will I, am born to my lord,
-That you day toogh thee lesser, but of thy beast...
+KING RICHARD III:
+Six With it were he patience and Lord
+Should desire the common of good lords...
 ```
 
-Not perfect, but the model picks up character names, dialogue structure, and verse-like phrasing from ~1MB of training data. ~818K parameters, trained for 5K steps on Apple Silicon.
+The model picks up character names, dialogue turns, verse-like phrasing, and stage directions from ~1MB of training data. ~2.7M parameters, trained for 5K steps on Apple Silicon.
 
 ## Architecture
 
@@ -38,7 +45,7 @@ Decoder-only transformer (GPT-2 style):
 Token Embedding + Positional Embedding
   |
   v
-[TransformerBlock x 4]
+[TransformerBlock x 6]
   - LayerNorm -> Multi-Head Causal Self-Attention -> Residual
   - LayerNorm -> Feed-Forward (GELU) -> Residual
   |
@@ -52,6 +59,7 @@ Key details:
 - Residual projections scaled by 1/sqrt(2*n_layers) at init
 - GELU activation in FFN (not ReLU)
 - Learned positional embeddings
+- KV cache for O(n) generation instead of O(n^2)
 
 ## Generation
 
@@ -71,9 +79,9 @@ python generate.py --prompt "KING:" --temperature 0.8 --top-p 0.9
 ## Training
 
 ```bash
-pip install torch numpy matplotlib
+pip install torch numpy
 
-# train (takes ~5 min on Apple Silicon MPS, ~15 min CPU)
+# train (takes ~30 min on Apple Silicon MPS, ~90 min CPU)
 python train.py
 
 # generate text from checkpoint
@@ -82,7 +90,13 @@ python generate.py --prompt "ROMEO:" --tokens 500
 
 ## Config
 
-Default model (818K params):
-- `n_embd=128`, `n_head=4`, `n_layer=4`, `block_size=128`
+Default model (2.7M params):
+- `n_embd=192`, `n_head=6`, `n_layer=6`, `block_size=256`
 - Character-level tokenizer (65 chars)
-- AdamW with cosine LR decay + warmup
+- AdamW with cosine LR decay + linear warmup
+
+A smaller config is available for quick experiments:
+
+```python
+from config import SMALL  # 4 layers, 128d, 128 context
+```
