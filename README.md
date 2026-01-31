@@ -1,8 +1,8 @@
 # tinylm
 
-Small GPT-style language model, built from scratch. Every transformer component (multi-head attention, positional embeddings, causal masking, feed-forward blocks) is implemented using raw PyTorch tensor operations. No `nn.TransformerEncoder` or pre-built attention modules.
+Small GPT style language model, built from scratch. Every transformer component (multi-head attention, positional embeddings, causal masking, feed forward blocks) is implemented using raw PyTorch tensor operations. No `nn.TransformerEncoder` or prebuilt attention modules.
 
-This is the follow-up to [nanograd](https://github.com/mohinpatell/nanograd), where I built an autograd engine from scratch. Now I wanted to understand transformers at the same level of depth.
+This is the follow up to [nanograd](https://github.com/mohinpatell/nanograd), where I built an autograd engine from scratch. Now I wanted to understand transformers at the same level of depth.
 
 Trained on Shakespeare. It writes decent fake Shakespeare.
 
@@ -35,11 +35,11 @@ Six With it were he patience and Lord
 Should desire the common of good lords...
 ```
 
-The model picks up character names, dialogue turns, verse-like phrasing, and stage directions from ~1MB of training data. ~2.7M parameters, trained for 5K steps on Apple Silicon.
+The model picks up character names, dialogue turns, verse like phrasing, and stage directions from ~1MB of training data. ~2.7M parameters, trained for 5K steps on Apple Silicon.
 
 ## Architecture
 
-Decoder-only transformer (GPT-2 style):
+Decoder only transformer (GPT-2 style):
 
 ```
 Token Embedding + Positional Embedding
@@ -54,7 +54,7 @@ LayerNorm -> Linear Head (weight-tied with embedding)
 ```
 
 Key details:
-- Pre-norm (LayerNorm before attention/FFN, not after)
+- Pre norm (LayerNorm before attention/FFN, not after)
 - Weight tying between token embedding and output head
 - Residual projections scaled by 1/sqrt(2*n_layers) at init
 - GELU activation in FFN (not ReLU)
@@ -92,7 +92,7 @@ python generate.py --prompt "ROMEO:" --tokens 500
 
 Default model (2.7M params):
 - `n_embd=192`, `n_head=6`, `n_layer=6`, `block_size=256`
-- Character-level tokenizer (65 chars)
+- Character level tokenizer (65 chars)
 - AdamW with cosine LR decay + linear warmup
 
 A smaller config is available for quick experiments:
