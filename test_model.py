@@ -28,7 +28,7 @@ def test_causal_attention():
 
     # our output
     our_attn.eval()
-    our_out = our_attn(x)
+    our_out, _ = our_attn(x)
 
     # pytorch output (need causal mask)
     causal_mask = torch.triu(torch.ones(16, 16, dtype=torch.bool), diagonal=1)
@@ -50,7 +50,7 @@ def test_forward_backward():
     idx = torch.randint(0, config.vocab_size, (4, 32))
     targets = torch.randint(0, config.vocab_size, (4, 32))
 
-    logits, loss = model(idx, targets)
+    logits, loss, _ = model(idx, targets)
     loss.backward()
 
     # check shapes
@@ -91,8 +91,8 @@ def test_causal_masking():
     idx2[0, 10:] = torch.randint(0, config.vocab_size, (6,))  # change tokens 10-15
 
     with torch.no_grad():
-        logits1, _ = model(idx1)
-        logits2, _ = model(idx2)
+        logits1, _, _ = model(idx1)
+        logits2, _, _ = model(idx2)
 
     # positions 0-9 should be identical (can't see tokens 10+)
     early_match = torch.allclose(logits1[0, :10], logits2[0, :10], atol=1e-5)
