@@ -1,4 +1,4 @@
-"""Training loop for the GPT model."""
+"""Training loop."""
 
 import os
 import time
@@ -12,7 +12,7 @@ from dataset import get_datasets
 
 
 def get_lr(step, config):
-    """Learning rate schedule: linear warmup then cosine decay."""
+    """Linear warmup then cosine decay."""
     if step < config.warmup_steps:
         return config.learning_rate * (step / config.warmup_steps)
     # cosine decay to 10% of max lr
@@ -24,7 +24,7 @@ def get_lr(step, config):
 
 @torch.no_grad()
 def estimate_loss(model, train_loader, val_loader, n_steps, device):
-    """Estimate loss on train and val sets."""
+    """Average loss over n_steps batches."""
     model.eval()
     losses = {}
     for name, loader in [('train', train_loader), ('val', val_loader)]:
@@ -65,7 +65,7 @@ def train():
     n_params = sum(p.numel() for p in model.parameters())
     print(f'Model: {n_params:,} parameters')
 
-    # optimizer: AdamW with weight decay only on weight matrices (not biases/layernorms)
+    # only apply weight decay to 2d+ params (skip biases, layernorms)
     decay_params = [p for n, p in model.named_parameters() if p.dim() >= 2]
     nodecay_params = [p for n, p in model.named_parameters() if p.dim() < 2]
     optimizer = torch.optim.AdamW([
@@ -91,16 +91,12 @@ def train():
             x, y = next(train_iter)
         x, y = x.to(device), y.to(device)
 
-        # update learning rate
         lr = get_lr(step, train_config)
         for param_group in optimizer.param_groups:
             param_group['lr'] = lr
 
-        # forward + backward
         _, loss, _ = model(x, y)
         loss.backward()
-
-        # gradient clipping
         torch.nn.utils.clip_grad_norm_(model.parameters(), train_config.grad_clip)
 
         optimizer.step()
@@ -127,18 +123,16 @@ def train():
     }, ckpt_path)
     print(f'\nSaved checkpoint to {ckpt_path}')
 
-    # generate a sample using KV cache
+    # quick sample to see how it's doing
     model.eval()
     prompt = torch.zeros((1, 1), dtype=torch.long, device=device)
     kv_caches = [None] * gpt_config.n_layer
     with torch.no_grad():
-        # first pass: process the initial token
         logits, _, kv_caches = model(prompt, kv_caches=None)
         for _ in range(200):
             probs = torch.softmax(logits[:, -1, :] / 0.8, dim=-1)
             next_tok = torch.multinomial(probs, num_samples=1)
             prompt = torch.cat([prompt, next_tok], dim=1)
-            # only process the new token, cache handles the rest
             logits, _, kv_caches = model(next_tok, kv_caches=kv_caches)
     generated = tok.decode(prompt[0].tolist())
     print(f'\nGenerated sample:\n{generated}')

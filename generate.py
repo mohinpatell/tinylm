@@ -1,4 +1,4 @@
-"""Generate text from a trained model."""
+"""Text generation."""
 
 import argparse
 import torch
@@ -25,13 +25,7 @@ def load_model(checkpoint_path, device='cpu'):
 @torch.no_grad()
 def generate(model, tok, config, prompt='', max_new_tokens=500,
              temperature=0.8, top_k=None, top_p=None, device='cpu'):
-    """Generate text with various sampling strategies.
-
-    Args:
-        temperature: higher = more random, lower = more deterministic
-        top_k: only sample from the top k most likely tokens
-        top_p: nucleus sampling, sample from tokens whose cumulative prob >= p
-    """
+    """Generate text token by token with optional top-k/top-p filtering."""
     if prompt:
         tokens = tok.encode(prompt)
         idx = torch.tensor([tokens], dtype=torch.long, device=device)
@@ -42,29 +36,24 @@ def generate(model, tok, config, prompt='', max_new_tokens=500,
     kv_caches = None
 
     for _ in range(max_new_tokens):
-        # if we have a KV cache and it's within block_size, just feed the last token
         if kv_caches is not None:
             input_ids = all_tokens[:, -1:]
         else:
-            # no cache (first iter or cache was dropped): feed last block_size tokens
             input_ids = all_tokens[:, -config.block_size:]
 
         logits, _, kv_caches = model(input_ids, kv_caches=kv_caches)
         logits = logits[:, -1, :]  # (1, vocab_size)
 
-        # drop cache if sequence exceeds block_size (positions would be wrong)
+        # drop cache if we've hit the context limit
         if kv_caches[0][0].shape[2] >= config.block_size:
             kv_caches = None
 
-        # temperature scaling
         logits = logits / temperature
 
-        # top-k filtering
         if top_k is not None:
             v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
             logits[logits < v[:, [-1]]] = float('-inf')
 
-        # top-p (nucleus) filtering
         if top_p is not None:
             sorted_logits, sorted_indices = torch.sort(logits, descending=True)
             cumulative_probs = torch.cumsum(torch.softmax(sorted_logits, dim=-1), dim=-1)

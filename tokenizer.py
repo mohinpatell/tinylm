@@ -1,8 +1,4 @@
-"""Character-level tokenizer.
-
-Simple but effective for a small model on Shakespeare.
-Each unique character gets an integer ID.
-"""
+"""Character-level tokenizer."""
 
 
 class CharTokenizer:

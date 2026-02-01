@@ -2,8 +2,6 @@
 
 Small GPT style language model, built from scratch. Every transformer component (multi-head attention, positional embeddings, causal masking, feed forward blocks) is implemented using raw PyTorch tensor operations. No `nn.TransformerEncoder` or prebuilt attention modules.
 
-This is the follow up to [nanograd](https://github.com/mohinpatell/nanograd), where I built an autograd engine from scratch. Now I wanted to understand transformers at the same level of depth.
-
 Trained on Shakespeare. It writes decent fake Shakespeare.
 
 ## Sample output

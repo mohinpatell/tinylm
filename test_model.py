@@ -1,4 +1,4 @@
-"""Verify our transformer components match PyTorch's implementations."""
+"""Tests against PyTorch reference implementations."""
 
 import torch
 import torch.nn as nn
@@ -8,7 +8,7 @@ from config import GPTConfig
 
 
 def test_causal_attention():
-    """Compare our attention against PyTorch's MultiheadAttention."""
+    """Check our attention matches nn.MultiheadAttention."""
     torch.manual_seed(42)
 
     config = GPTConfig(n_embd=64, n_head=4, block_size=32, dropout=0.0)
@@ -18,7 +18,6 @@ def test_causal_attention():
     pt_attn = nn.MultiheadAttention(64, 4, dropout=0.0, batch_first=True)
 
     # copy our weights into pytorch's format
-    # our qkv_proj is (3*C, C), pytorch uses separate in_proj_weight (3*C, C)
     pt_attn.in_proj_weight.data = our_attn.qkv_proj.weight.data.clone()
     pt_attn.in_proj_bias.data = our_attn.qkv_proj.bias.data.clone()
     pt_attn.out_proj.weight.data = our_attn.out_proj.weight.data.clone()
@@ -42,7 +41,7 @@ def test_causal_attention():
 
 
 def test_forward_backward():
-    """Make sure the full model can do a forward + backward pass without errors."""
+    """Full forward + backward pass."""
     torch.manual_seed(42)
     config = GPTConfig(n_embd=64, n_head=4, n_layer=2, block_size=32)
     model = GPT(config)
@@ -66,7 +65,7 @@ def test_forward_backward():
 
 
 def test_weight_tying():
-    """Verify that embedding and output head share the same weight tensor."""
+    """Embedding and output head should be the same tensor."""
     config = GPTConfig()
     model = GPT(config)
 
@@ -76,11 +75,7 @@ def test_weight_tying():
 
 
 def test_causal_masking():
-    """Verify that the model can't attend to future positions.
-
-    If we change a future token, it shouldn't affect the logits
-    at earlier positions.
-    """
+    """Changing future tokens shouldn't affect earlier positions."""
     torch.manual_seed(42)
     config = GPTConfig(n_embd=64, n_head=4, n_layer=2, block_size=32, dropout=0.0)
     model = GPT(config)

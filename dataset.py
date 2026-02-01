@@ -1,8 +1,4 @@
-"""Dataset for next-token prediction.
-
-Takes a long string of text, tokenizes it, and serves up
-(input, target) pairs where target is just the input shifted by 1.
-"""
+"""Dataset for next-token prediction."""
 
 import torch
 from torch.utils.data import Dataset

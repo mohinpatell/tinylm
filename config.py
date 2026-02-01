@@ -1,4 +1,4 @@
-"""Model and training hyperparameters."""
+"""Config."""
 
 from dataclasses import dataclass
 
