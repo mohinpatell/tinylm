@@ -96,11 +96,11 @@ A few that were worth remembering.
 
 **Position offset with KV cache.** Same commit. With cached decoding I was passing in just the new token, so `idx.shape[1] == 1` always. The original code did `pos = torch.arange(T)`, which gave the new token position 0 every time. Generation collapsed to garbage after a few tokens because every new token thought it was at the start of the sequence. Fix is to read the cache length out of `kv_caches[0][0].shape[2]` and offset positions from there. See `model.py:128`.
 
-**The KV cache scale up broke every test, silently.** Switching the model to return `(logits, loss, new_kv_caches)` meant every `_, loss = model(x, y)` in the test file became `_, loss = (logits, loss, caches)` — Python happily unpacked the wrong things and the tests still ran. The breakage was caught by hand reading, not by a failing assert. I now lean on tests where the *shape* of the unpacking is itself part of the contract, and on type checkers.
+**Adding the KV cache changed the forward-pass contract.** The model began returning `(logits, loss, new_kv_caches)`, while `test_model.py` still unpacked two values. Python raises `ValueError` for that arity mismatch; commit `916bc4d` updated those call sites to unpack the cache as well. The regression test now compares cached token-by-token logits against a full-sequence forward pass, so cache behavior is checked directly instead of only through generated samples.
 
 ## Validation against PyTorch
 
-`test_model.py` contains a numeric check against `torch.nn.MultiheadAttention`. The trick is that PyTorch's MHA uses a fused `in_proj_weight` of shape `(3*C, C)` — same layout as my `qkv_proj.weight` — so I can copy weights across without any reshape. With weights and biases copied, dropout off, both in `eval`, my output is bit identical to PyTorch's (`max diff: 0.00e+00` on CPU with torch 2.2). Passing this is what made me trust the layout.
+`test_model.py` contains a numerical check against `torch.nn.MultiheadAttention`. The trick is that PyTorch's MHA uses a fused `in_proj_weight` of shape `(3*C, C)` — same layout as my `qkv_proj.weight` — so I can copy weights across without any reshape. With weights and biases copied, dropout off, and both modules in `eval`, the test asserts equivalence with `atol=1e-5` and `rtol=1e-5`. A separate deterministic regression test compares KV-cached decoding with a full-sequence forward pass using `atol=1e-6` and `rtol=1e-5`. These are numerical-tolerance checks, not guarantees of bitwise identity across devices or PyTorch versions.
 
 ## What's not here
 
